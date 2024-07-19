@@ -1,0 +1,562 @@
+stm8/
+
+	#include "mapping.inc"
+	#include "stm8s103f.inc"
+	
+	  segment byte at 100 'ram1'
+buffer1  ds.b
+buffer2  ds.b
+buffer3  ds.b
+nibble1  ds.b	
+pad1     ds.b	
+counter  ds.b
+temp     ds.b	
+	
+	
+	
+	
+	segment 'rom'
+main.l
+	;mov CLK_CKDIVR,#$0                    ; set max internal clock
+	; initialize SP
+	ldw X,#stack_end
+	ldw SP,X
+
+	#ifdef RAM0	
+	; clear RAM0
+ram0_start.b EQU $ram0_segment_start
+ram0_end.b EQU $ram0_segment_end
+	ldw X,#ram0_start
+clear_ram0.l
+	clr (X)
+	incw X
+	cpw X,#ram0_end	
+	jrule clear_ram0
+	#endif
+
+	#ifdef RAM1
+	; clear RAM1
+ram1_start.w EQU $ram1_segment_start
+ram1_end.w EQU $ram1_segment_end	
+	ldw X,#ram1_start
+clear_ram1.l
+	clr (X)
+	incw X
+	cpw X,#ram1_end	
+	jrule clear_ram1
+	#endif
+
+	; clear stack
+stack_start.w EQU $stack_segment_start
+stack_end.w EQU $stack_segment_end
+	ldw X,#stack_start
+clear_stack.l
+	clr (X)
+	incw X
+	cpw X,#stack_end	
+	jrule clear_stack
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+
+infinite_loop.l
+write_address.b equ $4e
+SDA_L.b equ $10
+SCL_L.b equ $20
+SDA_H.b equ $EF
+SCL_H.b equ $DF
+data_command1.b equ $09			;0b00001001
+data_command2.b equ $0D			;0b00001101
+data_command3.b equ $09			;0b00001001		;
+inst_command1.b equ $08			;0b00001000		;
+inst_command2.b equ $0C			;0b00001100		;
+inst_command3.b equ $08			;0b00001000		;
+
+	call i2c_init
+	call i2c_start
+	call lcd_init
+here
+	
+	mov buffer2,#'H'		;0b010010000         ;data write to LCD , H of hello (0100-1000)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay
+	
+	mov buffer1,250
+	call delay
+	
+	call clear_display
+	mov buffer2,#'z'		;0b010010000         ;data write to LCD , H of hello (0100-1000)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay
+	
+	call clear_display
+	
+	mov buffer1,250
+	call delay
+	mov buffer1,250
+	call delay
+	mov buffer1,250
+	call delay
+	mov buffer1,250
+	call delay
+	
+	
+	call hello
+	mov buffer1,250
+	call delay
+	mov buffer1,250
+	call delay
+	mov buffer1,250
+	call delay
+	mov buffer1,250
+	call delay
+	jp here
+
+
+
+
+
+i2c_init:
+	ld a,PD_DDR
+	and a,#$CF		;11001111 ,PD5,PD4 =0
+	ld PD_DDR,a		;
+	ld a,PD_ODR
+	and a,#$CF		;11001111 ,PD5,PD4 =0
+	ld PD_ODR,a
+	ret
+
+
+sda_low:
+	ld a,PD_DDR
+	or a,#SDA_L
+	ld PD_DDR,a
+	ret
+
+sda_high:
+	ld a,PD_DDR
+	and a,#SDA_H
+	ld PD_DDR,a
+	ret
+
+
+scl_low:
+	ld a,PD_DDR
+	or a,#SCL_L
+	ld PD_DDR,a
+	ret
+
+
+scl_high:
+	ld a,PD_DDR
+	and a,#SCL_H
+	ld PD_DDR,a
+	ret
+
+
+i2c_stop:
+	call sda_low
+	call scl_high
+	call sda_high
+	ret
+
+i2c_start:
+	call sda_low
+	call scl_low
+	mov buffer2,#write_address
+	call i2c_write
+	ret
+
+
+i2c_write:
+	mov counter,#$08	; load counter 0x8 , 8 bits to be sent
+	mov temp,buffer2	; transfer contents to temp mem location
+write_loop
+	call sda_low		; make SDA low
+	ld a,temp		; copy contents of temp to accumulator register
+	and a,#$80		; and contents of A with 0x80 to test MSB =1 or MSB=0
+	jreq low		; if MSB is 0 jump to label low,skip next inst of SDA high
+	call sda_high		; if and operation confirms bit7 1 then SDA is made high
+	nop			; delay
+low
+	call scl_high		; raise SCL high
+	SLL temp		; logical shift contents of temp left,MSB is discarded
+	call scl_low		; make SCL low
+	dec counter		; decrease counter by 1
+	jrne write_loop		; if counter not reached 0 repeat the write loop for all bits
+	call sda_high		; 
+	nop
+	nop
+	call scl_high		; 9th pulse for ACK
+	call scl_low
+	ret
+
+
+
+
+
+
+nibble_write_instruction
+	mov pad1,buffer2				; data to be transmitted is in buffer2 copied to pad1
+	ld A,pad1			;padi is temp storage as nibble is changed during operation
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#inst_command1
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1             ;copies data again for upper nibble operation with inst-command2
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#inst_command2
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1             ;copies data for upper nibble operation with inst_command3
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#inst_command3
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1
+	swap A                    ;previous lower nibble is swapped to high nibble position
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#inst_command1
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1           ;copies data for upper nibble operation
+	swap A                    ;previous lower nibble is swapped to high nibble position
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#inst_command2
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1             ;copies data for upper nibble operation
+	swap A                    ;previous lower nibble is swapped to high nibble position
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#inst_command3
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ret
+
+
+
+
+nibble_write_data
+	mov pad1,buffer2				; data to be transmitted is in buffer2 copied to pad1
+	ld A,pad1			;padi is temp storage as nibble is changed during operation
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#data_command1
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1             ;copies data again for upper nibble operation with inst-command2
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#data_command2
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1             ;copies data for upper nibble operation with inst_command3
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#data_command3
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1
+	swap A                    ;previous lower nibble is swapped to high nibble position
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#data_command1
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1           ;copies data for upper nibble operation
+	swap A                    ;previous lower nibble is swapped to high nibble position
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#data_command2
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ld A,pad1             ;copies data for upper nibble operation
+	swap A                    ;previous lower nibble is swapped to high nibble position
+	AND A,#$F0               ;upper nibble is preserved in register nibble1
+	OR A,#data_command3
+	ld buffer2,A
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	
+	ret
+
+
+
+
+lcd_init
+	mov buffer1,#50
+	call delay      	;50ms delay as part of startup
+	
+	
+	mov buffer2,#$3C   	;Function set LCD , high nibble 0011 & lower commands led = 1,EN,RW,RS all 0.
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	mov buffer2,#$38   	;function set LCD ,high nibble 0011 & lower commands 1100 (led,en,rw,rs)
+    call i2c_write
+	mov buffer1,#50
+	call delay      	;50ms delay as part of startup
+    
+	
+	
+	
+	mov buffer2,#$3C         ;Function set LCD , high nibble 0011 & lower commands led = 1,EN,RW,RS all 0.
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	mov buffer2,#$38         ;function set LCD ,high nibble 0011 & lower commands 1100 (led,en,rw,rs)
+    call i2c_write
+	mov buffer1,#50
+	call delay      ;50ms delay as part of startup
+
+	
+	
+	
+	
+	mov buffer2,#$3C         ;Function set LCD , high nibble 0011 & lower commands led = 1,EN,RW,RS all 0.
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	mov buffer2,#$38         ;function set LCD ,high nibble 0011 & lower commands 1100 (led,en,rw,rs)
+    call i2c_write
+	mov buffer1,#50
+	call delay      ;50ms delay as part of startup
+    
+	
+    
+	
+	
+	mov buffer2,#$2C         ;
+	call i2c_write
+	mov buffer1,#20
+	call usdelay
+	mov buffer2,#$28         ;Function set LCD , high nibble 0010 & lower commands led,EN,RW,RS all 0.
+	call i2c_write
+	mov buffer1,#50
+	call delay      ;50ms delay as part of startup
+    
+	
+ 
+    
+	
+	
+	
+	mov buffer2,#$28			;0b00101000 (0x28 4 bit ,2 line ,5x7)Function set LCD ,
+	call nibble_write_instruction 
+
+	mov buffer1,#5
+	call delay                 ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay			
+	
+
+	
+	
+	
+	mov buffer2,#$0C                    ;0b00001000 (0x08 display off)Function set LCD , 
+	call nibble_write_instruction
+	
+	mov buffer1,#5
+	call delay        ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay	
+	
+	
+	
+	
+	
+	mov buffer2,#$06              ;0b00000001 Function set LCD  (clear display 0x01),  CLEAR DISPLAY
+	call nibble_write_instruction
+	
+	mov buffer1,#5
+	call delay        ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay
+	
+	
+
+	
+	mov buffer2,#$01              ;0b00000001 Function set LCD  (clear display 0x01),  CLEAR DISPLAY
+	call nibble_write_instruction
+	
+	mov buffer1,#5
+	call delay        ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay
+	
+	ret
+		
+	
+hello	
+	
+	mov buffer2,#'H'		;0b010010000         ;data write to LCD , H of hello (0100-1000)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay         ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay	rcall init
+
+	
+	
+	
+	
+	mov buffer2,#'E'		;0b01100101         ;data write to LCD , E of hello (0110-0101)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay         ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay	rcall init
+
+
+	
+	
+	
+	mov buffer2,#'L'		;0b01101100  ;data write to LCD , L of hello (0110-1100)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay         ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay	rcall init
+
+
+	
+	
+	
+	
+	mov buffer2,#'L'		;0b01101100         ;data write to LCD , L of hello (0110-1100)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay         ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay	rcall init
+	
+
+
+	
+	
+	
+	mov buffer2,#'O'      ;0b01101111         ;data write to LCD , O of hello (0110-1111)
+	call nibble_write_data
+	
+	mov buffer1,#5
+	call delay        ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay	rcall init
+
+	ret
+
+
+clear_display
+	mov buffer2,#$01              ;0b00000001 Function set LCD  (clear display 0x01),  CLEAR DISPLAY
+	call nibble_write_instruction
+	mov buffer1,#5
+	call delay        ;added by sajeev sa part of initialization of 16x2 LCD	,50us delay
+	ret
+
+
+
+
+
+delay 
+     ld a , buffer1
+load_ms	 						;640=1sec 2mhz, 125ms 16mhz
+    ldw y , #$188         ; 1ms delay  c80*5=1ms loop takes 5 cycles 
+loopd 
+     subw y , #01                 ; decrement with set carry 
+	 
+	jrne loopd
+	 dec a
+	 jrne load_ms
+	 
+    ret 
+
+
+usdelay
+	dec buffer1
+	jrne usdelay
+	ret
+
+
+
+
+
+
+
+
+
+
+
+	
+	
+	
+	
+	
+
+	
+	
+	
+
+	interrupt NonHandledInterrupt
+NonHandledInterrupt.l
+	iret
+
+	segment 'vectit'
+	dc.l {$82000000+main}					; reset
+	dc.l {$82000000+NonHandledInterrupt}	; trap
+	dc.l {$82000000+NonHandledInterrupt}	; irq0
+	dc.l {$82000000+NonHandledInterrupt}	; irq1
+	dc.l {$82000000+NonHandledInterrupt}	; irq2
+	dc.l {$82000000+NonHandledInterrupt}	; irq3
+	dc.l {$82000000+NonHandledInterrupt}	; irq4
+	dc.l {$82000000+NonHandledInterrupt}	; irq5
+	dc.l {$82000000+NonHandledInterrupt}	; irq6
+	dc.l {$82000000+NonHandledInterrupt}	; irq7
+	dc.l {$82000000+NonHandledInterrupt}	; irq8
+	dc.l {$82000000+NonHandledInterrupt}	; irq9
+	dc.l {$82000000+NonHandledInterrupt}	; irq10
+	dc.l {$82000000+NonHandledInterrupt}	; irq11
+	dc.l {$82000000+NonHandledInterrupt}	; irq12
+	dc.l {$82000000+NonHandledInterrupt}	; irq13 TIM2 update/overflow 
+	dc.l {$82000000+NonHandledInterrupt}	; irq14
+	dc.l {$82000000+NonHandledInterrupt}	; irq15
+	dc.l {$82000000+NonHandledInterrupt}	; irq16
+	dc.l {$82000000+NonHandledInterrupt}	; irq17
+	dc.l {$82000000+NonHandledInterrupt}	; irq18
+	dc.l {$82000000+NonHandledInterrupt}	; irq19
+	dc.l {$82000000+NonHandledInterrupt}	; irq20
+	dc.l {$82000000+NonHandledInterrupt}	; irq21
+	dc.l {$82000000+NonHandledInterrupt}	; irq22
+	dc.l {$82000000+NonHandledInterrupt}	; irq23
+	dc.l {$82000000+NonHandledInterrupt}	; irq24
+	dc.l {$82000000+NonHandledInterrupt}	; irq25
+	dc.l {$82000000+NonHandledInterrupt}	; irq26
+	dc.l {$82000000+NonHandledInterrupt}	; irq27
+	dc.l {$82000000+NonHandledInterrupt}	; irq28
+	dc.l {$82000000+NonHandledInterrupt}	; irq29
+
+	end
